@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>College Meeting Transcriber &amp; Document Generator</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #ffffff;
+    --primary: #1e3a5f;
+    --primary-600: #2563eb;
+    --primary-700: #1d4ed8;
+    --accent: #3b82f6;
+    --slate-50: #f8fafc;
+    --slate-100: #f1f5f9;
+    --slate-200: #e2e8f0;
+    --slate-300: #cbd5e1;
+    --slate-400: #94a3b8;
+    --slate-500: #64748b;
+    --slate-600: #475569;
+    --slate-700: #334155;
+    --slate-800: #1e293b;
+    --slate-900: #0f172a;
+    --success: #16a34a;
+    --warning: #d97706;
+    --error: #dc2626;
+    --radius: 10px;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,.06);
+    --shadow: 0 4px 12px rgba(15,23,42,.08);
+    --shadow-lg: 0 12px 32px rgba(15,23,42,.12);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: linear-gradient(180deg, #eef2f7 0%, #e2e8f0 100%);
+    color: var(--slate-800);
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+  .app { max-width: 1080px; margin: 0 auto; padding: 28px 20px 64px; }
+
+  /* Header */
+  .app-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; margin-bottom: 24px;
+  }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .brand-mark {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-600) 100%);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 20px; letter-spacing: .5px;
+    box-shadow: var(--shadow);
+  }
+  .brand h1 { margin: 0; font-size: 20px; color: var(--primary); font-weight: 700; letter-spacing: -.2px; }
+  .brand p { margin: 2px 0 0; font-size: 12px; color: var(--slate-500); }
+
+  /* Telemetry header */
+  .telemetry {
+    display: flex; align-items: center; gap: 18px;
+    background: var(--panel); border: 1px solid var(--slate-200);
+    border-radius: 999px; padding: 8px 18px; box-shadow: var(--shadow-sm);
+  }
+  .telemetry-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--slate-600); }
+  .telemetry-item .label { color: var(--slate-400); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  .telemetry-item .value { font-weight: 600; color: var(--slate-800); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--slate-400); position: relative; }
+  .dot.recording { background: var(--error); }
+  .dot.recording::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 50%;
+    background: var(--error); opacity: .5; animation: pulse 1.4s ease-out infinite;
+  }
+  .dot.done { background: var(--success); }
+  @keyframes pulse {
+    0% { transform: scale(.8); opacity: .6; }
+    100% { transform: scale(2.4); opacity: 0; }
+  }
+
+  /* Card */
+  .card {
+    background: var(--panel); border: 1px solid var(--slate-200);
+    border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 22px;
+    overflow: hidden;
+  }
+  .card-head { padding: 16px 20px; border-bottom: 1px solid var(--slate-100); display: flex; align-items: center; justify-content: space-between; }
+  .card-head h2 { margin: 0; font-size: 15px; color: var(--primary); font-weight: 700; }
+  .card-body { padding: 20px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--slate-200); background: var(--slate-50); }
+  .tab {
+    appearance: none; border: none; background: transparent; cursor: pointer;
+    padding: 14px 20px; font-size: 14px; font-weight: 600; color: var(--slate-500);
+    border-bottom: 3px solid transparent; transition: color .15s, border-color .15s, background .15s;
+  }
+  .tab:hover { color: var(--slate-700); background: var(--slate-100); }
+  .tab.active { color: var(--primary-700); border-bottom-color: var(--primary-600); background: #fff; }
+  .panel { display: none; padding: 20px; }
+  .panel.active { display: block; }
+
+  /* Inputs */
+  label.field-label { display: block; font-size: 12px; font-weight: 600; color: var(--slate-600); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .4px; }
+  input[type="text"], input[type="url"] {
+    width: 100%; padding: 12px 14px; font-size: 14px; border: 1px solid var(--slate-300);
+    border-radius: 8px; background: #fff; color: var(--slate-800); transition: border-color .15s, box-shadow .15s;
+  }
+  input[type="text"]:focus, input[type="url"]:focus { outline: none; border-color: var(--primary-600); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+  .row { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
+  .row > input { flex: 1 1 320px; }
+
+  /* Dropzone */
+  .dropzone {
+    border: 2px dashed var(--slate-300); border-radius: 10px; padding: 36px 20px;
+    text-align: center; color: var(--slate-500); background: var(--slate-50);
+    transition: border-color .15s, background .15s, color .15s; cursor: pointer;
+  }
+  .dropzone.dragover { border-color: var(--primary-600); background: #eff6ff; color: var(--primary-700); }
+  .dropzone .dz-title { font-weight: 600; color: var(--slate-700); margin-bottom: 4px; }
+  .dropzone .dz-sub { font-size: 12px; }
+  .dropzone .file-name { margin-top: 10px; font-size: 13px; color: var(--primary-700); font-weight: 600; }
+
+  /* Buttons */
+  .btn {
+    appearance: none; border: 1px solid transparent; cursor: pointer; font-size: 14px; font-weight: 600;
+    padding: 11px 18px; border-radius: 8px; transition: background .15s, border-color .15s, color .15s, transform .05s, box-shadow .15s;
+    display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: var(--primary-600); color: #fff; }
+  .btn-primary:hover { background: var(--primary-700); }
+  .btn-primary:disabled { background: var(--slate-300); cursor: not-allowed; }
+  .btn-live { background: linear-gradient(135deg, var(--error) 0%, #b91c1c 100%); color: #fff; box-shadow: 0 4px 14px rgba(220,38,38,.3); }
+  .btn-live:hover { filter: brightness(1.05); }
+  .btn-ghost { background: #fff; color: var(--slate-700); border-color: var(--slate-300); }
+  .btn-ghost:hover { background: var(--slate-50); border-color: var(--slate-400); }
+  .btn-stop { background: var(--slate-800); color: #fff; }
+  .btn-stop:hover { background: var(--slate-900); }
+  .btn-export { background: #fff; color: var(--primary-700); border-color: var(--primary-600); }
+  .btn-export:hover { background: #eff6ff; }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+
+  /* Console */
+  .console-wrap { position: relative; }
+  .console {
+    background: var(--slate-900); color: #e2e8f0; font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 13px; line-height: 1.55; padding: 16px 18px; height: 340px; overflow-y: auto;
+    border-radius: 8px; border: 1px solid var(--slate-800); white-space: pre-wrap; word-break: break-word;
+  }
+  .console .line { margin: 0 0 4px; }
+  .console .ts { color: var(--slate-500); margin-right: 8px; }
+  .console .interim { color: var(--slate-400); font-style: italic; }
+  .console .final { color: #e2e8f0; }
+  .console .sys { color: var(--accent); }
+  .console .err { color: #fca5a5; }
+  .console::-webkit-scrollbar { width: 10px; }
+  .console::-webkit-scrollbar-track { background: #0b1220; }
+  .console::-webkit-scrollbar-thumb { background: #334155; border-radius: 6px; }
+  .console-empty { color: var(--slate-500); font-style: italic; }
+
+  /* Status banner */
+  .status-banner {
+    display: none; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 8px;
+    font-size: 13px; font-weight: 600; margin-bottom: 14px;
+  }
+  .status-banner.show { display: flex; }
+  .status-banner.info { background: #eff6ff; color: var(--primary-700); border: 1px solid #bfdbfe; }
+  .status-banner.error { background: #fef2f2; color: var(--error); border: 1px solid #fecaca; }
+  .status-banner.success { background: #f0fdf4; color: var(--success); border: 1px solid #bbf7d0; }
+
+  .muted { color: var(--slate-500); font-size: 12px; }
+  .hint { margin-top: 10px; }
+
+  .export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 640px) { .export-grid { grid-template-columns: 1fr; } .telemetry { width: 100%; justify-content: space-between; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Header + telemetry -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-mark">CT</div>
+      <div>
+        <h1>College Meeting Transcriber</h1>
+        <p>Real-time transcription &amp; document generation</p>
+      </div>
+    </div>
+    <div class="telemetry" aria-live="polite">
+      <div class="telemetry-item">
+        <span class="dot" id="statusDot"></span>
+        <span class="label">State</span>
+        <span class="value" id="statusValue">Idle</span>
+      </div>
+      <div class="telemetry-item">
+        <span class="label">Server</span>
+        <span class="value" id="serverState">Idle</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Input card -->
+  <section class="card">
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="link" role="tab">Paste Video Link</button>
+      <button class="tab" data-tab="file" role="tab">Upload Video File</button>
+      <button class="tab" data-tab="live" role="tab">Go Live (Microphone)</button>
+    </div>
+
+    <!-- Link panel -->
+    <div class="panel active" id="panel-link">
+      <label class="field-label" for="videoUrl">Video URL</label>
+      <div class="row">
+        <input type="url" id="videoUrl" placeholder="https://example.edu/lecture.mp4" />
+        <button class="btn btn-primary" id="fetchLinkBtn">Fetch &amp; Process</button>
+      </div>
+      <p class="muted hint">The server downloads the media and transcribes it with Deepgram's pre-recorded API.</p>
+    </div>
+
+    <!-- File panel -->
+    <div class="panel" id="panel-file">
+      <label class="field-label">Video File</label>
+      <div class="dropzone" id="dropzone" tabindex="0">
+        <div class="dz-title">Drag &amp; drop a video file here, or click to browse</div>
+        <div class="dz-sub">Accepts .mp4, .webm, .mov, .mkv, .avi, .m4a, .mp3</div>
+        <div class="file-name" id="fileName"></div>
+        <input type="file" id="fileInput" accept="video/*,audio/*" hidden />
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="uploadFileBtn">Upload &amp; Process</button>
+        <button class="btn btn-ghost" id="clearFileBtn">Clear</button>
+      </div>
+    </div>
+
+    <!-- Live panel -->
+    <div class="panel" id="panel-live">
+      <label class="field-label">Live Classroom Streaming</label>
+      <p class="muted">Captures microphone audio and streams it to Deepgram in real time. Grant microphone permission when prompted.</p>
+      <div class="btn-row">
+        <button class="btn btn-live" id="startLiveBtn">Start Live Classroom Streaming</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Session control -->
+  <section class="card">
+    <div class="card-head"><h2>Session Control</h2></div>
+    <div class="card-body">
+      <div class="status-banner" id="statusBanner"></div>
+      <div class="btn-row" style="margin-top:0;">
+        <button class="btn btn-stop" id="stopSaveBtn" disabled>Stop &amp; Save Session</button>
+      </div>
+      <p class="muted hint">Freezes all active pipes and prepares the transcript for export.</p>
+    </div>
+  </section>
+
+  <!-- Live transcript console -->
+  <section class="card">
+    <div class="card-head">
+      <h2>Real-Time Activity Logger</h2>
+      <span class="muted" id="lineCount">0 lines</span>
+    </div>
+    <div class="card-body">
+      <div class="console-wrap">
+        <div class="console" id="console" aria-live="polite">
+          <div class="console-empty">Awaiting stream… Transcribed packets will appear here in real time.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Document export center -->
+  <section class="card">
+    <div class="card-head"><h2>Document Export Center</h2></div>
+    <div class="card-body">
+      <div class="export-grid">
+        <button class="btn btn-export" id="downloadTxtBtn" disabled>Download Text (.txt)</button>
+        <button class="btn btn-export" id="exportPdfBtn" disabled>Export PDF Summary</button>
+      </div>
+      <p class="muted hint">The PDF summary is generated by Gemini and structured into Executive Summary, Key Decisions Made, and Assigned Action Items.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+'use strict';
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+const state = {
+  clientId: null,
+  ws: null,
+  mediaRecorder: null,
+  mediaStream: null,
+  audioCtx: null,
+  downsampleProcessor: null,
+  sourceNode: null,
+  mode: null,        // 'live' | 'link' | 'file'
+  recording: false,
+  transcriptLines: 0,
+  pendingFile: null,
+};
+
+// ---------------------------------------------------------------------------
+// DOM helpers
+// ---------------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const consoleEl = $('console');
+const statusDot = $('statusDot');
+const statusValue = $('statusValue');
+const serverState = $('serverState');
+const statusBanner = $('statusBanner');
+const stopSaveBtn = $('stopSaveBtn');
+const downloadTxtBtn = $('downloadTxtBtn');
+const exportPdfBtn = $('exportPdfBtn');
+const lineCount = $('lineCount');
+
+function setServerState(value, dotClass) {
+  serverState.textContent = value;
+  statusValue.textContent = value;
+  statusDot.className = 'dot ' + (dotClass || '');
+}
+function showBanner(msg, kind) {
+  statusBanner.className = 'status-banner show ' + kind;
+  statusBanner.textContent = msg;
+  if (kind === 'success') setTimeout(() => { statusBanner.className = 'status-banner'; }, 4000);
+}
+function clearBanner() { statusBanner.className = 'status-banner'; }
+
+let consoleCleared = false;
+function logLine(text, cls) {
+  if (!consoleCleared) { consoleEl.innerHTML = ''; consoleCleared = true; }
+  const line = document.createElement('div');
+  line.className = 'line ' + (cls || '');
+  const ts = document.createElement('span');
+  ts.className = 'ts';
+  ts.textContent = new Date().toLocaleTimeString();
+  line.appendChild(ts);
+  line.appendChild(document.createTextNode(text));
+  consoleEl.appendChild(line);
+  consoleEl.scrollTop = consoleEl.scrollHeight;
+  state.transcriptLines++;
+  lineCount.textContent = state.transcriptLines + ' lines';
+}
+function logSystem(text) { logLine(text, 'sys'); }
+function logError(text) { logLine(text, 'err'); }
+function logTranscript(text, isFinal) {
+  logLine(text, isFinal ? 'final' : 'interim');
+}
+
+// ---------------------------------------------------------------------------
+// Tab switching
+// ---------------------------------------------------------------------------
+document.querySelectorAll('.tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
+    tab.classList.add('active');
+    $('panel-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WebSocket connection (live streaming)
+// ---------------------------------------------------------------------------
+function wsUrl() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${proto}://${location.host}/stream`;
+}
+
+function connectLive() {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl());
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => resolve(ws);
+    ws.onerror = (e) => reject(new Error('WebSocket connection failed.'));
+    ws.onclose = () => { if (state.ws === ws) { state.ws = null; setServerState('Idle', ''); } };
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        handleServerMessage(msg);
+      } catch (e) { /* ignore non-json */ }
+    };
+  });
+}
+
+function handleServerMessage(msg) {
+  switch (msg.type) {
+    case 'hello':
+      state.clientId = msg.clientId;
+      setServerState(msg.state || 'Idle', '');
+      logSystem('Connected to streaming server.');
+      break;
+    case 'status':
+      setServerState(msg.state || 'Idle', msg.state === 'Recording...' ? 'recording' : msg.state === 'Streaming Completed' ? 'done' : '');
+      if (msg.message) logSystem(msg.message);
+      break;
+    case 'transcript':
+      logTranscript(msg.entry.text, msg.entry.isFinal);
+      break;
+    case 'error':
+      logError(msg.message || 'Server error.');
+      showBanner(msg.message || 'Server error.', 'error');
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Audio capture + 16 kHz linear16 downsample for Deepgram
+// ---------------------------------------------------------------------------
+async function startLiveStreaming() {
+  if (state.recording) return;
+  try {
+    setServerState('Recording...', 'recording');
+    logSystem('Requesting microphone access…');
+    state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    // Connect to server WS
+    const ws = await connectLive();
+    state.ws = ws;
+    ws.send(JSON.stringify({ type: 'start' }));
+
+    // Build an AudioContext to downsample to 16 kHz mono linear16
+    state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    await state.audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([PCM_WORKLET], { type: 'application/javascript' })));
+    state.sourceNode = state.audioCtx.createMediaStreamSource(state.mediaStream);
+    state.downsampleProcessor = new AudioWorkletNode(state.audioCtx, 'pcm-16k-processor');
+    state.sourceNode.connect(state.downsampleProcessor);
+
+    state.downsampleProcessor.port.onmessage = (e) => {
+      if (ws.readyState === WebSocket.OPEN && state.recording) {
+        ws.send(e.data); // ArrayBuffer of Int16 PCM @ 16kHz
+      }
+    };
+
+    // Also keep a MediaRecorder for resilience/backup (not strictly required for Deepgram)
+    state.mediaRecorder = new MediaRecorder(state.mediaStream);
+    state.mediaRecorder.ondataavailable = () => { /* raw audio forwarded via worklet */ };
+    state.mediaRecorder.start(250);
+
+    state.recording = true;
+    stopSaveBtn.disabled = false;
+    logSystem('Live streaming started. Forwarding 16kHz PCM to Deepgram.');
+  } catch (err) {
+    setServerState('Idle', '');
+    logError(err.message || 'Failed to start streaming.');
+    showBanner(err.message || 'Failed to start streaming.', 'error');
+    stopLiveStreaming(true);
+  }
+}
+
+function stopLiveStreaming(silent) {
+  if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+    try { state.mediaRecorder.stop(); } catch {}
+  }
+  state.mediaRecorder = null;
+  if (state.sourceNode) { try { state.sourceNode.disconnect(); } catch {} state.sourceNode = null; }
+  if (state.downsampleProcessor) { try { state.downsampleProcessor.disconnect(); } catch {} state.downsampleProcessor = null; }
+  if (state.audioCtx) { try { state.audioCtx.close(); } catch {} state.audioCtx = null; }
+  if (state.mediaStream) { state.mediaStream.getTracks().forEach((t) => t.stop()); state.mediaStream = null; }
+
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({ type: 'stop' }));
+  }
+  state.recording = false;
+  setServerState('Streaming Completed', 'done');
+  if (!silent) {
+    logSystem('Session stopped. Transcript cached on server.');
+    showBanner('Session saved. You can now export your documents.', 'success');
+    enableExports();
+  }
+}
+
+// AudioWorklet source: downsample input to 16kHz mono Int16
+const PCM_WORKLET = `
+class Pcm16kProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this._ratio = sampleRate / 16000;
+    this._buf = [];
+    this._phase = 0;
+  }
+  process(inputs) {
+    const input = inputs[0];
+    if (!input || !input[0]) return true;
+    const ch = input[0]; // mono
+    // simple linear resample to 16kHz
+    for (let n = 0; n < ch.length; n++) {
+      this._phase += 1;
+      if (this._phase >= this._ratio) {
+        this._phase -= this._ratio;
+        const s = Math.max(-1, Math.min(1, ch[n]));
+        this._buf.push(s < 0 ? s * 0x8000 : s * 0x7fff);
+      }
+    }
+    if (this._buf.length >= 800) { // ~50ms @ 16kHz
+      const out = new Int16Array(this._buf.splice(0, 800));
+      this.port.postMessage(out.buffer, [out.buffer]);
+    }
+    return true;
+  }
+}
+registerProcessor('pcm-16k-processor', Pcm16kProcessor);
+`;
+
+// ---------------------------------------------------------------------------
+// Paste Video Link
+// ---------------------------------------------------------------------------
+$('fetchLinkBtn').addEventListener('click', async () => {
+  const url = $('videoUrl').value.trim();
+  if (!url) { showBanner('Please enter a video URL.', 'error'); return; }
+  setServerState('Processing…', 'recording');
+  showBanner('Fetching and transcribing media…', 'info');
+  logSystem('Fetching media from ' + url);
+  try {
+    const res = await fetch('/api/process-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Processing failed.');
+    state.clientId = data.clientId;
+    state.mode = 'link';
+    setServerState('Streaming Completed', 'done');
+    logSystem('Transcription complete. ' + (data.transcript ? data.transcript.length : 0) + ' characters.');
+    if (data.transcript) logLine(data.transcript, 'final');
+    showBanner('Transcription complete. Ready to export.', 'success');
+    enableExports();
+  } catch (err) {
+    setServerState('Idle', '');
+    logError(err.message);
+    showBanner(err.message, 'error');
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Upload Video File
+// ---------------------------------------------------------------------------
+const dropzone = $('dropzone');
+const fileInput = $('fileInput');
+const fileNameEl = $('fileName');
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+['dragenter','dragover'].forEach((ev) => dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.add('dragover'); }));
+['dragleave','drop'].forEach((ev) => dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); }));
+dropzone.addEventListener('drop', (e) => {
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) setPendingFile(f);
+});
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files && fileInput.files[0];
+  if (f) setPendingFile(f);
+});
+function setPendingFile(f) {
+  state.pendingFile = f;
+  fileNameEl.textContent = f.name + ' (' + (f.size / 1048576).toFixed(1) + ' MB)';
+}
+$('clearFileBtn').addEventListener('click', () => {
+  state.pendingFile = null;
+  fileInput.value = '';
+  fileNameEl.textContent = '';
+});
+$('uploadFileBtn').addEventListener('click', async () => {
+  if (!state.pendingFile) { showBanner('Please choose a video file first.', 'error'); return; }
+  setServerState('Processing…', 'recording');
+  showBanner('Uploading and transcribing file…', 'info');
+  logSystem('Uploading ' + state.pendingFile.name);
+  try {
+    const res = await fetch('/api/process-file', {
+      method: 'POST',
+      headers: { 'Content-Type': state.pendingFile.type || 'application/octet-stream' },
+      body: state.pendingFile,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Upload failed.');
+    state.clientId = data.clientId;
+    state.mode = 'file';
+    setServerState('Streaming Completed', 'done');
+    logSystem('File transcription complete. ' + (data.transcript ? data.transcript.length : 0) + ' characters.');
+    if (data.transcript) logLine(data.transcript, 'final');
+    showBanner('Transcription complete. Ready to export.', 'success');
+    enableExports();
+  } catch (err) {
+    setServerState('Idle', '');
+    logError(err.message);
+    showBanner(err.message, 'error');
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Buttons
+// ---------------------------------------------------------------------------
+$('startLiveBtn').addEventListener('click', () => {
+  state.mode = 'live';
+  startLiveStreaming();
+});
+
+stopSaveBtn.addEventListener('click', () => {
+  if (state.mode === 'live') {
+    stopLiveStreaming(false);
+  } else {
+    setServerState('Streaming Completed', 'done');
+    enableExports();
+    showBanner('Session saved. You can now export your documents.', 'success');
+  }
+});
+
+function enableExports() {
+  downloadTxtBtn.disabled = false;
+  exportPdfBtn.disabled = false;
+  stopSaveBtn.disabled = true;
+}
+
+// Download raw transcript .txt
+downloadTxtBtn.addEventListener('click', async () => {
+  if (!state.clientId) { showBanner('No active session to export.', 'error'); return; }
+  downloadTxtBtn.disabled = true;
+  try {
+    const res = await fetch('/api/transcript', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Client-Id': state.clientId },
+      body: JSON.stringify({ clientId: state.clientId }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Download failed.'); }
+    const blob = await res.blob();
+    triggerDownload(blob, 'meeting-transcript.txt');
+    showBanner('Text transcript downloaded.', 'success');
+  } catch (err) {
+    showBanner(err.message, 'error');
+  } finally {
+    downloadTxtBtn.disabled = false;
+  }
+});
+
+// Export PDF summary
+exportPdfBtn.addEventListener('click', async () => {
+  if (!state.clientId) { showBanner('No active session to export.', 'error'); return; }
+  exportPdfBtn.disabled = true;
+  showBanner('Generating PDF summary via OpenAI…', 'info');
+  try {
+    const res = await fetch('/api/summary/pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Client-Id': state.clientId },
+      body: JSON.stringify({ clientId: state.clientId }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || 'PDF generation failed.');
+    }
+    const blob = await res.blob();
+    triggerDownload(blob, 'meeting-summary.pdf');
+    showBanner('PDF summary exported.', 'success');
+  } catch (err) {
+    showBanner(err.message, 'error');
+  } finally {
+    exportPdfBtn.disabled = false;
+  }
+});
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+</script>
+</body>
+</html>
