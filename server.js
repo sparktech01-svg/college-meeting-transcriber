@@ -412,7 +412,14 @@ const { spawn, execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
+function extractYouTubeVideoId(url) {
+  if (!url) return null;
+  const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/i);
+  return match ? match[1] : null;
+}
+
 function getYtDlpPath() {
+
   const customPath = 'C:\\Users\\admin\\.node\\yt-dlp.exe';
   if (fs.existsSync(customPath)) return customPath;
   return 'yt-dlp';
@@ -505,11 +512,17 @@ app.post('/api/process-link', async (req, res) => {
   }
 
   try {
-    const isYouTube = /youtube\.com|youtu\.be/i.test(url);
-    if (isYouTube) {
+    const videoId = extractYouTubeVideoId(url);
+    if (videoId) {
+      console.log(`[process-link] Extracted YouTube Video ID: ${videoId} from ${url}`);
       try {
-        console.log(`[process-link] Fetching YouTube transcript for: ${url}`);
-        const items = await YoutubeTranscript.fetchTranscript(url);
+        let items = null;
+        try {
+          items = await YoutubeTranscript.fetchTranscript(videoId);
+        } catch (e) {
+          items = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'en' });
+        }
+
         if (items && items.length > 0) {
           const clientId = makeClientId();
           const session = ensureSession(clientId);
@@ -520,21 +533,28 @@ app.post('/api/process-link', async (req, res) => {
               .replace(/&amp;/g, '&')
               .replace(/&quot;/g, '"')
               .replace(/&#39;/g, "'")
+              .replace(/\[.*?\]/g, '')
               .trim();
             if (cleanText) {
               session.transcript.push({ t: (item.offset / 1000) || 0, text: cleanText });
               textParts.push(cleanText);
             }
           }
-          const fullTranscript = textParts.join(' ');
-          return res.json({ clientId, transcript: fullTranscript });
+          const fullTranscript = textParts.join(' ').trim();
+          if (fullTranscript) {
+            return res.json({ clientId, transcript: fullTranscript });
+          }
         }
       } catch (ytErr) {
-        console.warn('[process-link] YoutubeTranscript error, falling back:', ytErr.message);
+        console.warn('[process-link] YoutubeTranscript failed for ID ' + videoId + ':', ytErr.message);
+        return res.status(400).json({
+          error: 'No captions/transcript available for this YouTube video. Please use a YouTube video with captions enabled, or use the "Upload Video File" tab.'
+        });
       }
     }
 
     const { mediaBuf, contentType } = await fetchMediaFromUrl(url);
+
 
 
     const dgRes = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true', {
