@@ -370,21 +370,32 @@ function wsUrl() {
   return `${proto}://${location.host}/stream`;
 }
 
-function connectLive() {
+function connectLive(retries = 2) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(wsUrl());
-    ws.binaryType = 'arraybuffer';
-    ws.onopen = () => resolve(ws);
-    ws.onerror = (e) => reject(new Error('WebSocket connection failed.'));
-    ws.onclose = () => { if (state.ws === ws) { state.ws = null; setServerState('Idle', ''); } };
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        handleServerMessage(msg);
-      } catch (e) { /* ignore non-json */ }
+    const tryConnect = (attemptsLeft) => {
+      const ws = new WebSocket(wsUrl());
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => resolve(ws);
+      ws.onerror = (e) => {
+        if (attemptsLeft > 0) {
+          logSystem('Connecting to streaming server (waking up server)...');
+          setTimeout(() => tryConnect(attemptsLeft - 1), 2000);
+        } else {
+          reject(new Error('WebSocket connection failed. Please ensure the server is running and HTTPS is used.'));
+        }
+      };
+      ws.onclose = () => { if (state.ws === ws) { state.ws = null; setServerState('Idle', ''); } };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          handleServerMessage(msg);
+        } catch (e) { /* ignore non-json */ }
+      };
     };
+    tryConnect(retries);
   });
 }
+
 
 function handleServerMessage(msg) {
   switch (msg.type) {
@@ -424,6 +435,10 @@ async function startLiveStreaming() {
 
     // Build an AudioContext to downsample to 16 kHz mono linear16
     state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (state.audioCtx.state === 'suspended') {
+      await state.audioCtx.resume();
+    }
+
     await state.audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([PCM_WORKLET], { type: 'application/javascript' })));
     state.sourceNode = state.audioCtx.createMediaStreamSource(state.mediaStream);
     state.downsampleProcessor = new AudioWorkletNode(state.audioCtx, 'pcm-16k-processor');
