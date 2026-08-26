@@ -25,6 +25,8 @@ const fs = require('fs');
 const { URL } = require('url');
 const WebSocket = require('ws');
 const PDFDocument = require('pdfkit');
+const { YoutubeTranscript } = require('youtube-transcript');
+
 // Auto-load local .env file if present
 const envPath = path.join(__dirname, '.env');
 if (fs.existsSync(envPath)) {
@@ -503,7 +505,37 @@ app.post('/api/process-link', async (req, res) => {
   }
 
   try {
+    const isYouTube = /youtube\.com|youtu\.be/i.test(url);
+    if (isYouTube) {
+      try {
+        console.log(`[process-link] Fetching YouTube transcript for: ${url}`);
+        const items = await YoutubeTranscript.fetchTranscript(url);
+        if (items && items.length > 0) {
+          const clientId = makeClientId();
+          const session = ensureSession(clientId);
+          const textParts = [];
+          for (const item of items) {
+            const cleanText = (item.text || '')
+              .replace(/\n/g, ' ')
+              .replace(/&amp;/g, '&')
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .trim();
+            if (cleanText) {
+              session.transcript.push({ t: (item.offset / 1000) || 0, text: cleanText });
+              textParts.push(cleanText);
+            }
+          }
+          const fullTranscript = textParts.join(' ');
+          return res.json({ clientId, transcript: fullTranscript });
+        }
+      } catch (ytErr) {
+        console.warn('[process-link] YoutubeTranscript error, falling back:', ytErr.message);
+      }
+    }
+
     const { mediaBuf, contentType } = await fetchMediaFromUrl(url);
+
 
     const dgRes = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true', {
       method: 'POST',
