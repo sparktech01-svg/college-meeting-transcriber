@@ -460,7 +460,7 @@ async function fetchMediaFromUrl(targetUrl) {
       console.log(`[process-link] HTML content type detected. Attempting yt-dlp extraction: ${finalUrl}`);
       return await downloadMediaWithYtDlp(finalUrl);
     } catch (e) {
-      throw new Error('The URL provided points to a webpage instead of a direct video/audio media file.');
+      throw new Error('This URL points to a webpage (e.g. YouTube). Please use a direct media link (.mp3, .mp4, .webm, Google Drive, Dropbox) or use the "Upload Video File" tab.');
     }
   }
 
