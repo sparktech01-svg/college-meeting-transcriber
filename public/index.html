@@ -428,36 +428,48 @@ async function startLiveStreaming() {
     logSystem('Requesting microphone access…');
     state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    // Connect to server WS
-    const ws = await connectLive();
-    state.ws = ws;
-    ws.send(JSON.stringify({ type: 'start' }));
+    let useWebSocket = true;
+    try {
+      // Try WebSocket connection first
+      const ws = await connectLive(0);
+      state.ws = ws;
+      ws.send(JSON.stringify({ type: 'start' }));
 
-    // Build an AudioContext to downsample to 16 kHz mono linear16
-    state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (state.audioCtx.state === 'suspended') {
-      await state.audioCtx.resume();
+      // Build an AudioContext to downsample to 16 kHz mono linear16
+      state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (state.audioCtx.state === 'suspended') {
+        await state.audioCtx.resume();
+      }
+
+      await state.audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([PCM_WORKLET], { type: 'application/javascript' })));
+      state.sourceNode = state.audioCtx.createMediaStreamSource(state.mediaStream);
+      state.downsampleProcessor = new AudioWorkletNode(state.audioCtx, 'pcm-16k-processor');
+      state.sourceNode.connect(state.downsampleProcessor);
+
+      state.downsampleProcessor.port.onmessage = (e) => {
+        if (ws.readyState === WebSocket.OPEN && state.recording) {
+          ws.send(e.data); // ArrayBuffer of Int16 PCM @ 16kHz
+        }
+      };
+      logSystem('Live WebSocket streaming active.');
+    } catch (wsErr) {
+      useWebSocket = false;
+      logSystem('WebSockets unavailable on serverless host (Vercel). Switched to HTTP recording mode.');
     }
 
-    await state.audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([PCM_WORKLET], { type: 'application/javascript' })));
-    state.sourceNode = state.audioCtx.createMediaStreamSource(state.mediaStream);
-    state.downsampleProcessor = new AudioWorkletNode(state.audioCtx, 'pcm-16k-processor');
-    state.sourceNode.connect(state.downsampleProcessor);
-
-    state.downsampleProcessor.port.onmessage = (e) => {
-      if (ws.readyState === WebSocket.OPEN && state.recording) {
-        ws.send(e.data); // ArrayBuffer of Int16 PCM @ 16kHz
+    state.isHttpFallback = !useWebSocket;
+    state.recordedChunks = [];
+    state.mediaRecorder = new MediaRecorder(state.mediaStream);
+    state.mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        state.recordedChunks.push(e.data);
       }
     };
-
-    // Also keep a MediaRecorder for resilience/backup (not strictly required for Deepgram)
-    state.mediaRecorder = new MediaRecorder(state.mediaStream);
-    state.mediaRecorder.ondataavailable = () => { /* raw audio forwarded via worklet */ };
     state.mediaRecorder.start(250);
 
     state.recording = true;
     stopSaveBtn.disabled = false;
-    logSystem('Live streaming started. Forwarding 16kHz PCM to Deepgram.');
+    showBanner(useWebSocket ? 'Recording live…' : 'Recording via HTTP mode. Click Stop to transcribe.', 'info');
   } catch (err) {
     setServerState('Idle', '');
     logError(err.message || 'Failed to start streaming.');
@@ -466,7 +478,10 @@ async function startLiveStreaming() {
   }
 }
 
-function stopLiveStreaming(silent) {
+async function stopLiveStreaming(silent) {
+  const wasHttpFallback = state.isHttpFallback;
+  state.recording = false;
+
   if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
     try { state.mediaRecorder.stop(); } catch {}
   }
@@ -479,14 +494,43 @@ function stopLiveStreaming(silent) {
   if (state.ws && state.ws.readyState === WebSocket.OPEN) {
     state.ws.send(JSON.stringify({ type: 'stop' }));
   }
-  state.recording = false;
-  setServerState('Streaming Completed', 'done');
-  if (!silent) {
-    logSystem('Session stopped. Transcript cached on server.');
-    showBanner('Session saved. You can now export your documents.', 'success');
-    enableExports();
+
+  if (wasHttpFallback && state.recordedChunks && state.recordedChunks.length > 0 && !silent) {
+    setServerState('Processing…', 'recording');
+    showBanner('Transcribing recorded audio via serverless API…', 'info');
+    logSystem('Sending recorded audio to Vercel API for Deepgram transcription…');
+    try {
+      const blob = new Blob(state.recordedChunks, { type: 'audio/webm' });
+      const res = await fetch('/api/process-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'audio/webm' },
+        body: blob,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Transcription failed.');
+      state.clientId = data.clientId;
+      if (data.transcript) {
+        logLine(data.transcript, 'final');
+      }
+      setServerState('Streaming Completed', 'done');
+      logSystem('Transcription complete. Ready to export.');
+      showBanner('Transcription complete. Ready to export.', 'success');
+      enableExports();
+    } catch (err) {
+      setServerState('Idle', '');
+      logError(err.message);
+      showBanner(err.message, 'error');
+    }
+  } else {
+    setServerState('Streaming Completed', 'done');
+    if (!silent) {
+      logSystem('Session stopped. Transcript cached on server.');
+      showBanner('Session saved. You can now export your documents.', 'success');
+      enableExports();
+    }
   }
 }
+
 
 // AudioWorklet source: downsample input to 16kHz mono Int16
 const PCM_WORKLET = `
